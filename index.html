@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Quiz with Folders & Sets (Persistent, Quiz Mode & Deletion)</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+    /* Container for sidebar and main content */
+    #container {
+      display: flex;
+      height: 100vh;
+    }
+    /* Sidebar styling */
+    #sidebar {
+      width: 250px;
+      background-color: #f4f4f4;
+      border-right: 1px solid #ccc;
+      padding: 15px;
+      overflow-y: auto;
+    }
+    #sidebar h2 {
+      margin-top: 0;
+    }
+    #sidebar button {
+      margin-bottom: 10px;
+      padding: 5px 10px;
+      font-size: 0.9em;
+    }
+    ul.folder-list, ul.set-list {
+      list-style: none;
+      padding-left: 10px;
+    }
+    ul.folder-list li {
+      margin-bottom: 8px;
+    }
+    .folder-header {
+      cursor: pointer;
+      display: inline-block;
+    }
+    .folder-toggle {
+      font-weight: bold;
+    }
+    .folder-name {
+      font-weight: bold;
+    }
+    .set-name {
+      cursor: pointer;
+      margin-left: 15px;
+    }
+    /* Main content styling */
+    #main-content {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+    /* Default view styling */
+    #default-view h2 { margin-top: 0; }
+    /* Editor view styling */
+    #editor-view h2 { margin-top: 0; }
+    #json-editor {
+      width: 100%;
+      height: 300px;
+    }
+    .error {
+      color: red;
+      margin-top: 10px;
+    }
+    /* Quiz view styling */
+    #quiz-view, #review-view {
+      display: none;
+    }
+    #progress, #timer {
+      font-size: 1.1em;
+      margin-bottom: 10px;
+    }
+    .question {
+      font-size: 1.2em;
+      margin-bottom: 20px;
+    }
+    .options {
+      list-style: none;
+      padding: 0;
+    }
+    .option {
+      margin-bottom: 10px;
+    }
+    button.option-button {
+      padding: 10px 15px;
+      font-size: 1em;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+    }
+    .correct {
+      background-color: #c8e6c9;
+    }
+    .incorrect {
+      background-color: #ffcdd2;
+    }
+    .explanation {
+      margin-top: 20px;
+      font-style: italic;
+    }
+    #nextBtn, #backToEditorBtn {
+      margin-top: 20px;
+      padding: 10px 15px;
+      font-size: 1em;
+    }
+    /* Review view styling */
+    .review-question {
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+      padding: 10px;
+    }
+    .review-question ul {
+      list-style: none;
+      padding: 0;
+    }
+    .review-question li {
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <!-- Sidebar Menu -->
+    <div id="sidebar">
+      <h2>Quiz Menu</h2>
+      <button onclick="addFolder()">Add Folder</button>
+      <ul id="folderList" class="folder-list"></ul>
+    </div>
+    
+    <!-- Main Content Area -->
+    <div id="main-content">
+      <!-- Default View -->
+      <div id="default-view">
+        <h2>Welcome</h2>
+        <p>Select a quiz set from the menu or create a new folder and quiz set.</p>
+      </div>
+      
+      <!-- Editor View: For editing a quiz set's JSON questions -->
+      <div id="editor-view" style="display: none;">
+        <h2 id="set-title"></h2>
+        <textarea id="json-editor" placeholder="Paste your quiz JSON here..."></textarea><br>
+        <button onclick="saveQuizSet()">Save Quiz Set</button>
+        <button onclick="startQuiz()">Start Quiz</button>
+        <div id="editor-error" class="error"></div>
+      </div>
+      
+      <!-- Quiz View -->
+      <div id="quiz-view">
+        <div id="progress">Question 0/0 | Correct: 0</div>
+        <div id="timer">Time: 00:00</div>
+        <div id="question" class="question"></div>
+        <ul id="options" class="options"></ul>
+        <div id="explanation" class="explanation"></div>
+        <button id="skipBtn" onclick="skipQuestion()">Skip Question</button>
+        <button id="nextBtn" onclick="nextQuestion()" style="display: none;">Next Question</button>
+        <button id="backToEditorBtn" onclick="backToEditor()" style="display: none;">Back to Editor</button>
+      </div>
+      
+      <!-- Review View -->
+      <div id="review-view">
+        <div id="review-content"></div>
+        <button onclick="backToEditor()">Back to Editor</button>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // -------------------------------
+    // Persistent Folders & Quiz Sets
+    // Each folder is { name: string, sets: [ { name: string, json: string } ] }
+    let foldersData = [];
+    let currentFolderIndex = null;
+    let currentSetIndex = null;
+    
+    // Save data to localStorage
+    function saveToLocalStorage() {
+      localStorage.setItem("quizFolders", JSON.stringify(foldersData));
+    }
+    
+    // Load data from localStorage (if available)
+    function loadFromLocalStorage() {
+      const stored = localStorage.getItem("quizFolders");
+      if (stored) {
+        try {
+          foldersData = JSON.parse(stored);
+        } catch (e) {
+          console.error("Error parsing stored quiz data:", e);
+          foldersData = [];
+        }
+      }
+    }
+    
+    // Render the sidebar menu based on foldersData
+    function renderMenu() {
+      const folderList = document.getElementById("folderList");
+      folderList.innerHTML = "";
+      foldersData.forEach((folder, fIndex) => {
+        const li = document.createElement("li");
+    
+        // Create a container for the folder header with arrow, folder name, and delete button
+        const folderHeader = document.createElement("div");
+        folderHeader.className = "folder-header";
+        folderHeader.style.cursor = "pointer";
+        folderHeader.onclick = () => toggleFolder(fIndex);
+    
+        const arrowSpan = document.createElement("span");
+        arrowSpan.className = "folder-toggle";
+        arrowSpan.textContent = "▶ ";
+    
+        const folderNameSpan = document.createElement("span");
+        folderNameSpan.className = "folder-name";
+        folderNameSpan.textContent = folder.name;
+    
+        folderHeader.appendChild(arrowSpan);
+        folderHeader.appendChild(folderNameSpan);
+    
+        // Delete Folder Button
+        const deleteFolderBtn = document.createElement("button");
+        deleteFolderBtn.textContent = "Delete Folder";
+        deleteFolderBtn.style.marginLeft = "10px";
+        deleteFolderBtn.onclick = (e) => {
+          e.stopPropagation();
+          if (confirm("Are you sure you want to delete this folder?")) {
+            deleteFolder(fIndex);
+          }
+        };
+        folderHeader.appendChild(deleteFolderBtn);
+    
+        li.appendChild(folderHeader);
+    
+        // Button to add a new quiz set in this folder
+        const addSetBtn = document.createElement("button");
+        addSetBtn.textContent = "Add Quiz Set";
+        addSetBtn.style.marginLeft = "10px";
+        addSetBtn.onclick = (e) => {
+          e.stopPropagation();
+          addQuizSet(fIndex);
+        };
+        li.appendChild(addSetBtn);
+    
+        // Container for the folder's quiz sets
+        const setList = document.createElement("ul");
+        setList.className = "set-list";
+        setList.id = "folder-" + fIndex;
+        setList.style.display = "none"; // Hidden initially
+    
+        folder.sets.forEach((set, sIndex) => {
+          const setLi = document.createElement("li");
+    
+          const setSpan = document.createElement("span");
+          setSpan.className = "set-name";
+          setSpan.textContent = set.name;
+          setSpan.onclick = () => editQuizSet(fIndex, sIndex);
+          setLi.appendChild(setSpan);
+    
+          // Delete Quiz Set Button
+          const deleteSetBtn = document.createElement("button");
+          deleteSetBtn.textContent = "Delete";
+          deleteSetBtn.style.marginLeft = "5px";
+          deleteSetBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (confirm("Are you sure you want to delete this quiz set?")) {
+              deleteQuizSet(fIndex, sIndex);
+            }
+          };
+          setLi.appendChild(deleteSetBtn);
+    
+          setList.appendChild(setLi);
+        });
+    
+        li.appendChild(setList);
+        folderList.appendChild(li);
+      });
+    }
+    
+    // Toggle the display of quiz sets within a folder and update the arrow icon
+    function toggleFolder(fIndex) {
+      const setList = document.getElementById("folder-" + fIndex);
+      // Find the arrow span in the folder header
+      const folderHeader = setList.parentElement.querySelector(".folder-header");
+      const arrowSpan = folderHeader.querySelector(".folder-toggle");
+      if (setList) {
+        if (setList.style.display === "none") {
+          setList.style.display = "block";
+          arrowSpan.textContent = "▼ ";
+        } else {
+          setList.style.display = "none";
+          arrowSpan.textContent = "▶ ";
+        }
+      }
+    }
+    
+    // Delete folder at index fIndex
+    function deleteFolder(fIndex) {
+      foldersData.splice(fIndex, 1);
+      saveToLocalStorage();
+      renderMenu();
+    }
+    
+    // Delete quiz set at index sIndex within folder fIndex
+    function deleteQuizSet(fIndex, sIndex) {
+      foldersData[fIndex].sets.splice(sIndex, 1);
+      saveToLocalStorage();
+      renderMenu();
+    }
+    
+    // Prompt for a new folder name and add it
+    function addFolder() {
+      const folderName = prompt("Enter folder name:");
+      if (folderName) {
+        foldersData.push({ name: folderName, sets: [] });
+        saveToLocalStorage();
+        renderMenu();
+      }
+    }
+    
+    // Prompt for a new quiz set name within a folder and add it
+    function addQuizSet(fIndex) {
+      const setName = prompt("Enter quiz set name:");
+      if (setName) {
+        if (!foldersData[fIndex].sets) {
+          foldersData[fIndex].sets = [];
+        }
+        foldersData[fIndex].sets.push({ name: setName, json: "" });
+        saveToLocalStorage();
+        renderMenu();
+      }
+    }
+    
+    // Open the editor view for a selected quiz set
+    function editQuizSet(fIndex, sIndex) {
+      currentFolderIndex = fIndex;
+      currentSetIndex = sIndex;
+      const quizSet = foldersData[fIndex].sets[sIndex];
+      document.getElementById("default-view").style.display = "none";
+      document.getElementById("editor-view").style.display = "block";
+      document.getElementById("quiz-view").style.display = "none";
+      document.getElementById("review-view").style.display = "none";
+      document.getElementById("set-title").textContent = foldersData[fIndex].name + " / " + quizSet.name;
+      document.getElementById("json-editor").value = quizSet.json;
+    }
+    
+    // Save the JSON from the editor into the current quiz set
+    function saveQuizSet() {
+      const jsonText = document.getElementById("json-editor").value;
+      const errorDiv = document.getElementById("editor-error");
+      try {
+        const questions = JSON.parse(jsonText);
+        if (!Array.isArray(questions) || questions.length === 0) {
+          throw "The JSON must be a non-empty array of questions.";
+        }
+        questions.forEach(q => {
+          if (!q.question || !q.options || q.options.length !== 5 || q.correctIndex === undefined || !q.explanation) {
+            throw "Each question must have 'question', 'options' (5 items), 'correctIndex', and 'explanation'.";
+          }
+        });
+        foldersData[currentFolderIndex].sets[currentSetIndex].json = jsonText;
+        saveToLocalStorage();
+        errorDiv.textContent = "Saved successfully!";
+        setTimeout(() => { errorDiv.textContent = ""; }, 2000);
+      } catch (e) {
+        errorDiv.textContent = "Error: " + e;
+      }
+    }
+    
+    // -------------------------------
+    // Quiz Interface Variables & Functions
+    let selectedQuestions = [];
+    let currentQuestionIndexQuiz = 0;
+    let correctCount = 0;
+    let userResponses = [];
+    let timerSeconds = 0;
+    let timerInterval;
+    
+    function hideAllViews() {
+      document.getElementById("default-view").style.display = "none";
+      document.getElementById("editor-view").style.display = "none";
+      document.getElementById("quiz-view").style.display = "none";
+      document.getElementById("review-view").style.display = "none";
+    }
+    
+    function updateQuizProgress() {
+      const progressDiv = document.getElementById("progress");
+      progressDiv.innerHTML = "Question " + (currentQuestionIndexQuiz + 1) + "/" + selectedQuestions.length + " | Correct: " + correctCount;
+    }
+    
+    function updateTimer() {
+      timerSeconds++;
+      let minutes = Math.floor(timerSeconds / 60);
+      let seconds = timerSeconds % 60;
+      let formatted = (minutes < 10 ? "0" + minutes : minutes) + ":" + (seconds < 10 ? "0" + seconds : seconds);
+      document.getElementById("timer").innerHTML = "Time: " + formatted;
+    }
+    
+    function startTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+      }
+      timerSeconds = 0;
+      document.getElementById("timer").innerHTML = "Time: 00:00";
+      timerInterval = setInterval(updateTimer, 1000);
+    }
+    
+    function loadQuestion() {
+      updateQuizProgress();
+      const questionDiv = document.getElementById("question");
+      const optionsList = document.getElementById("options");
+      const explanationDiv = document.getElementById("explanation");
+      const nextBtn = document.getElementById("nextBtn");
+      explanationDiv.innerHTML = "";
+      nextBtn.style.display = "none";
+      optionsList.innerHTML = "";
+      // Ensure skip button is visible at the start of each question
+      document.getElementById("skipBtn").style.display = "inline-block";
+      
+      const currentQuestion = selectedQuestions[currentQuestionIndexQuiz];
+      questionDiv.innerHTML = currentQuestion.question;
+      currentQuestion.options.forEach((option, index) => {
+        const li = document.createElement("li");
+        li.className = "option";
+        const btn = document.createElement("button");
+        btn.innerHTML = option;
+        btn.className = "option-button";
+        btn.onclick = () => checkAnswer(index, btn);
+        li.appendChild(btn);
+        optionsList.appendChild(li);
+      });
+    }
+    
+    function checkAnswer(selectedIndex, btnElement) {
+      const currentQuestion = selectedQuestions[currentQuestionIndexQuiz];
+      const explanationDiv = document.getElementById("explanation");
+      const buttons = document.querySelectorAll("button.option-button");
+      // Disable all option buttons
+      buttons.forEach(btn => btn.disabled = true);
+      
+      // Hide the skip button once an answer is chosen
+      document.getElementById("skipBtn").style.display = "none";
+      
+      // Record the user's response
+      userResponses[currentQuestionIndexQuiz] = selectedIndex;
+      if (selectedIndex === currentQuestion.correctIndex) {
+        btnElement.classList.add("correct");
+        explanationDiv.innerHTML = "Correct! " + currentQuestion.explanation;
+        correctCount++;
+      } else {
+        btnElement.classList.add("incorrect");
+        buttons[currentQuestion.correctIndex].classList.add("correct");
+        explanationDiv.innerHTML = "Incorrect. " + currentQuestion.explanation;
+      }
+      updateQuizProgress();
+      document.getElementById("nextBtn").style.display = "block";
+    }
+    
+    // Skip question functionality
+    function skipQuestion() {
+      // Record that the user skipped this question (using null as a marker)
+      userResponses[currentQuestionIndexQuiz] = null;
+      
+      // Move to the next question
+      currentQuestionIndexQuiz++;
+      
+      // If there are more questions, load the next one
+      if (currentQuestionIndexQuiz < selectedQuestions.length) {
+        loadQuestion();
+      } else {
+        clearInterval(timerInterval);
+        showReview();
+      }
+    }
+    
+    function nextQuestion() {
+      currentQuestionIndexQuiz++;
+      if (currentQuestionIndexQuiz < selectedQuestions.length) {
+        loadQuestion();
+      } else {
+        clearInterval(timerInterval);
+        showReview();
+      }
+    }
+    
+    function showReview() {
+      let minutes = Math.floor(timerSeconds / 60);
+      let seconds = timerSeconds % 60;
+      let formatted = (minutes < 10 ? "0" + minutes : minutes) + ":" + (seconds < 10 ? "0" + seconds : seconds);
+      let reviewHTML = "<h2>Quiz Completed!</h2>";
+      reviewHTML += "<p>Your score: " + correctCount + " out of " + selectedQuestions.length + "</p>";
+      reviewHTML += "<p>Time taken: " + formatted + "</p>";
+      reviewHTML += "<h3>Review:</h3>";
+      selectedQuestions.forEach((q, index) => {
+        reviewHTML += "<div class='review-question'>";
+        reviewHTML += "<p><strong>Question " + (index + 1) + ":</strong> " + q.question + "</p>";
+        reviewHTML += "<ul>";
+        q.options.forEach((option, i) => {
+          let cls = "";
+          if (i === q.correctIndex) cls = "correct";
+          if (userResponses[index] === i && userResponses[index] !== q.correctIndex) cls = "incorrect";
+          reviewHTML += "<li class='" + cls + "'>" + option;
+          if (i === q.correctIndex) reviewHTML += " (Correct Answer)";
+          if (userResponses[index] === i) reviewHTML += " (Your Answer)";
+          reviewHTML += "</li>";
+        });
+        reviewHTML += "</ul>";
+        reviewHTML += "<p><em>" + q.explanation + "</em></p>";
+        reviewHTML += "</div>";
+      });
+      hideAllViews();
+      document.getElementById("review-view").style.display = "block";
+      document.getElementById("review-content").innerHTML = reviewHTML;
+    }
+    
+    function backToEditor() {
+      clearInterval(timerInterval);
+      hideAllViews();
+      document.getElementById("editor-view").style.display = "block";
+    }
+    
+    // Start Quiz: Validate JSON, initialize quiz variables, switch view, start timer, load first question.
+    function startQuiz() {
+      const jsonText = document.getElementById("json-editor").value;
+      const errorDiv = document.getElementById("editor-error");
+      try {
+        const questions = JSON.parse(jsonText);
+        if (!Array.isArray(questions) || questions.length === 0) {
+          throw "The JSON must be a non-empty array of questions.";
+        }
+        questions.forEach(q => {
+          if (!q.question || !q.options || q.options.length !== 5 || q.correctIndex === undefined || !q.explanation) {
+            throw "Each question must have 'question', 'options' (5 items), 'correctIndex', and 'explanation'.";
+          }
+        });
+        // Save the JSON to the current quiz set
+        foldersData[currentFolderIndex].sets[currentSetIndex].json = jsonText;
+        saveToLocalStorage();
+        // Initialize quiz variables
+        selectedQuestions = questions;
+        currentQuestionIndexQuiz = 0;
+        correctCount = 0;
+        userResponses = [];
+        errorDiv.textContent = "";
+        hideAllViews();
+        document.getElementById("quiz-view").style.display = "block";
+        startTimer();
+        loadQuestion();
+      } catch (e) {
+        errorDiv.textContent = "Error: " + e;
+      }
+    }
+    
+    // On page load, load persistent data and render the menu.
+    window.onload = function() {
+      loadFromLocalStorage();
+      renderMenu();
+      if (foldersData.length === 0) {
+        document.getElementById("default-view").style.display = "block";
+      }
+    };
+  </script>
+</body>
+</html>
